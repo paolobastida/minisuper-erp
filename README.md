@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Minisuper ERP
 
-## Getting Started
+ERP para minisupermercado: catálogo, inventario, terminal POS, control de caja,
+compras simples y un asistente por WhatsApp.
 
-First, run the development server:
+**Stack**
+
+- [Next.js 16](https://nextjs.org) (App Router) + React + TypeScript
+- [Supabase](https://supabase.com) (PostgreSQL + Auth OTP por teléfono)
+- Deploy en [Vercel](https://vercel.com)
+- Agente WhatsApp (Fase 5): API de Claude + proveedor WhatsApp (Green API / Meta Cloud API)
+
+**Arquitectura**: hexagonal (Ports & Adapters) con bounded contexts en [`src/modules/`](src/modules/README.md)
+(`catalog`, `inventory`, `sales`, `purchases`) y value objects en [`src/shared/`](src/shared/README.md).
+
+## Puesta en marcha
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# 1. Dependencias
+npm install
+
+# 2. Variables de entorno
+cp .env.example .env.local
+# Edita .env.local con las claves de tu proyecto Supabase
+
+# 3. Base de datos
+# Aplica supabase/migrations/0001_init.sql desde el SQL Editor de Supabase
+# (o con el CLI: supabase db push)
+
+# 4. Desarrollo
+npm run dev        # http://localhost:3000
+npm test           # tests unitarios (Vitest)
+npm run lint       # ESLint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Configurar Supabase (una vez)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Crea el proyecto en [supabase.com](https://supabase.com) (plan Free).
+2. **Project Settings → API**: copia `Project URL` y `anon public` key a `.env.local`.
+3. **Authentication → Providers → Phone**: activa el proveedor SMS.
+   - Para pruebas puedes usar el *Twilio test credentials* de Supabase
+     (los SMS de prueba van a números verificados).
+   - Producción: tu propia cuenta Twilio (o MessageBird…).
+4. **Authentication → URL Configuration**: añade la URL de Vercel cuando exista.
+5. Aplica la migración `supabase/migrations/0001_init.sql`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Roles
 
-## Learn More
+- `staff` (por defecto): vende, consulta stock.
+- `owner`: además gestiona compras, precios y reportes.
 
-To learn more about Next.js, take a look at the following resources:
+El rol se guarda en `public.profiles.role` y se controla con RLS.
+El primer usuario que se registra debe cambiar su rol a `owner` en la tabla
+`profiles` (SQL Editor):
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```sql
+update public.profiles set role = 'owner'
+where telefono = '+34...';
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Roadmap
 
-## Deploy on Vercel
+| Fase | Contenido | Estado |
+|---|---|---|
+| 0 | Scaffolding, `shared/`, auth OTP, esquema SQL | ✅ |
+| 1 | Catálogo + Inventario | ⬜ |
+| 2 | POS (tickets y cobro) | ⬜ |
+| 3 | Cierre de caja / arqueo | ⬜ |
+| 4 | Compras simples | ⬜ |
+| 5 | Agente WhatsApp (solo lectura) | ⬜ |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Decisiones técnicas
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Money en céntimos / Quantity en milésimas** — sin errores de flotante;
+  redondeo comercial (*half away from zero*). Ver `src/shared/`.
+- **Inventario = única fuente de verdad del stock**; el POS solo lee
+  disponibilidad.
+- **Ticket captura el precio al vender** (foto de precio): cambios de PVP
+  posteriores no alteran tickets ya cobrados.
+- **Next.js 16**: `middleware.ts` → `proxy.ts`; `cacheComponents` activo.
